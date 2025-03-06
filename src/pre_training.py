@@ -1,9 +1,13 @@
 import torch
 from dotenv import dotenv_values
+from tqdm import tqdm
 
-from BearLLM.functions.mbhm import mbhm_vibration_dataloader as mbhm_loader
-from BearLLM.models.FCN import FaultClassificationNetwork as FCN
+from functions.mbhm import get_loaders
+from models.FCN import FaultClassificationNetwork as FCN
 
+env = dotenv_values()
+bearllm_weights = env['BEARLLM_WEIGHTS']
+fcn_weights = f'{bearllm_weights}/fcn'
 
 class HyperParameters:
     def __init__(self):
@@ -19,11 +23,12 @@ class HyperParameters:
 class PreTrainner:
     def __init__(self):
         self.hp = HyperParameters()
-        self.train_loader = mbhm_loader('train', self.hp.batch_size, num_workers=self.hp.num_workers)
-        self.val_loader = mbhm_loader('val', self.hp.batch_size, num_workers=self.hp.num_workers)
-        self.test_loader = mbhm_loader('test', self.hp.batch_size, num_workers=self.hp.num_workers)
+        train_loader, val_loader, test_loader = get_loaders(self.hp.batch_size, self.hp.num_workers)
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.test_loader = test_loader
         self.model = FCN().to(self.hp.device)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.hp.lr)
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.hp.lr)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min', patience=self.hp.lr_patience,
                                                                     factor=self.hp.lr_factor)
         self.criterion = torch.nn.CrossEntropyLoss()
@@ -32,7 +37,7 @@ class PreTrainner:
 
     def train_epoch(self):
         self.model.train()
-        for i, (data, label) in enumerate(self.train_loader):
+        for data, label in tqdm(self.train_loader):
             data = data.to(self.hp.device)
             label = label.to(self.hp.device)
             self.optimizer.zero_grad()
@@ -46,28 +51,28 @@ class PreTrainner:
         self.model.eval()
         with torch.no_grad():
             val_loss = 0
-            val_acc = 0
+            correct = 0
             for i, (data, label) in enumerate(self.val_loader):
                 data = data.to(self.hp.device)
                 label = label.to(self.hp.device)
                 output = self.model(data)
                 loss = self.criterion(output, label)
                 val_loss += loss.item()
-                val_acc += (output.argmax(1) == label).sum().item()
+                correct += (output.argmax(1) == label).sum().item()
             val_loss /= len(self.val_loader)
-            val_acc /= len(self.val_loader.dataset)
+            val_acc = correct / len(self.val_loader.dataset)
         return val_loss, val_acc
 
     def test_epoch(self):
         self.model.eval()
         with torch.no_grad():
-            test_acc = 0
+            correct = 0
             for i, (data, label) in enumerate(self.test_loader):
                 data = data.to(self.hp.device)
                 label = label.to(self.hp.device)
                 output = self.model(data)
-                test_acc += (output.argmax(1) == label).sum().item()
-            test_acc /= len(self.test_loader.dataset)
+                correct += (output.argmax(1) == label).sum().item()
+            test_acc = correct / len(self.test_loader.dataset)
         return test_acc
 
     def train(self):
@@ -76,10 +81,10 @@ class PreTrainner:
             val_loss, val_acc = self.eval_epoch()
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
-                self.model.save_weights(dotenv_values()['FCN_WEIGHTS_DIR'])
+                self.model.save_weights(fcn_weights)
             if val_acc > self.best_val_acc:
                 self.best_val_acc = val_acc
-                self.model.save_weights(dotenv_values()['FCN_WEIGHTS_DIR'])
+                self.model.save_weights(fcn_weights)
             print(f'epoch: {epoch}, val_loss: {val_loss}, val_acc: {val_acc}')
             if self.scheduler.state_dict()['_last_lr'][0] < 1e-7:
                 break

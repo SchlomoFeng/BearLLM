@@ -1,129 +1,129 @@
-import numpy as np
-from torch.utils.data import Dataset, DataLoader
 from dotenv import dotenv_values
 import sqlite3
-from BearLLM.functions.dcn import dcn
+import random
+import json
+import h5pickle as h5py
+import os
+from torch.utils.data import Dataset, DataLoader
+import numpy as np
 
+env = dotenv_values()
+dataset_path = env['MBHM_DATASET']
+data_path = f'{dataset_path}/data.hdf5'
+meta_path = f'{dataset_path}/metadata.sqlite'
+cache_path = f'{dataset_path}/dataset.json'
+corpus_path = f'{dataset_path}/corpus.json'
 
-def get_split_id_list(id_list: list, mode: str):
-    split_ratio = [0.7, 0.2, 0.1]
-    list_length = len(id_list)
-    length_list = [int(list_length * ratio) for ratio in split_ratio]
-    if mode == 'train':
-        return id_list[:length_list[0]]
-    elif mode == 'val':
-        return id_list[length_list[0]:length_list[0] + length_list[1]]
-    elif mode == 'test':
-        return id_list[length_list[0] + length_list[1]:]
-    else:
-        if mode != 'all':
-            print('Invalid mode, return all data')
-        return id_list
-
-
-def get_cid_list():
-    conn = sqlite3.connect(dotenv_values()['MBHM_INDEX_DB'])
+def get_ref_ids():
+    conn = sqlite3.connect(meta_path)
     cursor = conn.cursor()
-    cursor.execute('SELECT cid FROM cid_info')
-    cid_list = cursor.fetchall()
+    cursor.execute('SELECT condition_id, file_id FROM file_info WHERE label = 0')
+    ref_data = cursor.fetchall()
     conn.close()
-    return [cid[0] for cid in cid_list]
+    ref_ids = {}
+    for condition_id, file_id in ref_data:
+        if condition_id not in ref_ids:
+            ref_ids[condition_id] = []
+        ref_ids[condition_id].append(file_id)
+    return ref_ids
 
-
-def get_fault_free_uuid_list(cid: int, mode='train'):
-    conn = sqlite3.connect(dotenv_values()['MBHM_INDEX_DB'])
+def create_cache_dataset():
+    ref_ids = get_ref_ids()
+    conn = sqlite3.connect(meta_path)
     cursor = conn.cursor()
-    cursor.execute(f'SELECT uuid FROM vibration WHERE cid = {cid} AND label = 0 ORDER BY uuid')
-    uuid_list = cursor.fetchall()
-    conn.close()
-    uuid_list = [uuid[0] for uuid in uuid_list]
-    return get_split_id_list(uuid_list, mode)
-
-
-def load_vibration_index_db(mode='all'):
-    conn = sqlite3.connect(dotenv_values()['MBHM_INDEX_DB'])
-    cursor = conn.cursor()
-    cursor.execute('SELECT uuid, label, cid FROM vibration ORDER BY uuid')
-    vibration_list = cursor.fetchall()
-    conn.close()
-    return get_split_id_list(vibration_list, mode)
-
-
-def load_text_db():
-    conn = sqlite3.connect(dotenv_values()['MBHM_INDEX_DB'])
-
-    text_dict = {}
-    for label in range(10):
-        text_dict[label] = {}
-        for tid in range(4):
-            text_dict[label][tid] = []
-
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM text ORDER BY id')
-    text_list = cursor.fetchall()
+    cursor.execute('SELECT condition_id, file_id, label FROM file_info')
+    data = cursor.fetchall()
     conn.close()
 
-    for text in text_list:
-        label = text[1]
-        tid = text[2]
-        text_dict[label][tid].append((text[3], text[4]))
+    dataset_info = {}
+    for subset in ['train', 'val', 'test']:
+        dataset_info[subset] = []
 
-    return text_dict
+    now_num = 0
+    for condition_id, file_id, label in data:
+        if condition_id in ref_ids:
+            c_ids = ref_ids[condition_id]
+            r_ids = []
+            for i in range(3):
+                r_ids.append(random.choice(c_ids))
+            if now_num % 10 < 7:
+                subset = 'train'
+            elif now_num % 10 < 9:
+                subset = 'val'
+            else:
+                subset = 'test'
+            for r_id in r_ids:
+                dataset_info[subset].append([file_id, r_id, label])
+            now_num += 1
+
+    with open(cache_path, 'w') as f:
+        json.dump(dataset_info, f)
 
 
-class FaultFreeDataset:
-    def __init__(self, mode='train'):
-        self.cid_list = get_cid_list()
-        self.uuid_dict = {}
-        for cid in self.cid_list:
-            self.uuid_dict[cid] = get_fault_free_uuid_list(cid, mode)
+def load_cache_dataset():
+    if not os.path.exists(cache_path):
+        create_cache_dataset()
+    with open(cache_path, 'r') as f:
+        dataset_info = json.load(f)
+    return dataset_info
 
-    def get_uuid(self, cid: int):
-        uuid = self.uuid_dict[cid].pop()
-        self.uuid_dict[cid].insert(0, uuid)
-        return uuid
-
-
-class MBHMVibrationDataset(Dataset):
-    def __init__(self, mode='all'):
-        self.vibration_list = load_vibration_index_db(mode)
-        self.length = len(self.vibration_list)
-        self.ref_dataset = FaultFreeDataset('train')
+class VibDataset(Dataset):
+    def __init__(self, subset_info):
+        self.subset_info = subset_info
+        self.data = h5py.File(data_path, 'r')['vibration']
 
     def __len__(self):
-        return self.length
+        return len(self.subset_info)
 
     def __getitem__(self, idx):
-        uuid, label, cid = self.vibration_list[idx]
-        ref_uuid = self.ref_dataset.get_uuid(cid)
-        query_data = np.load(f'{dotenv_values()['MBHM_DATA_DIR']}/{uuid}.npy')
-        query_data = dcn(query_data)
-        ref_data = np.load(f'{dotenv_values()['MBHM_DATA_DIR']}/{ref_uuid}.npy')
-        ref_data = dcn(ref_data)
-        res_data = query_data - ref_data
-        rv = np.array([query_data, ref_data, res_data])
-        return rv, label
+        file_id, ref_id, label = self.subset_info[idx]
+        data = self.data[file_id]
+        ref = self.data[ref_id]
+        data = np.array([data, ref])
+        return data, label
 
 
-def mbhm_vibration_dataloader(mode='all', batch_size=1024, shuffle=True, num_workers=0):
-    dataset = MBHMVibrationDataset(mode)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+def get_datasets():
+    dataset_info = load_cache_dataset()
+    train_dataset = VibDataset(dataset_info['train'])
+    val_dataset = VibDataset(dataset_info['val'])
+    test_dataset = VibDataset(dataset_info['test'])
+    return train_dataset, val_dataset, test_dataset
+
+def get_loaders(batch_size, num_workers):
+    train_set, val_set, test_set = get_datasets()
+    train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=num_workers, shuffle=True)
+    val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=num_workers, shuffle=True, drop_last=False)
+    test_loader = DataLoader(test_set, batch_size=batch_size, num_workers=num_workers, shuffle=True, drop_last=False)
+    return train_loader, val_loader, test_loader
 
 
-class MBHMDataset(Dataset):
-    def __init__(self, mode='all'):
-        self.vibration_list = load_vibration_index_db(mode)
-        self.length = len(self.vibration_list) * 4
-        self.text_dict = load_text_db()
+class CorpusDataset:
+    def __init__(self):
+        self.vib_data = h5py.File(data_path, 'r')['vibration']
+        self.corpus = json.load(open(corpus_path, 'r'))
 
     def __len__(self):
-        return self.length
+        return len(self.corpus)
 
     def __getitem__(self, idx):
-        uuid, label, cid = self.vibration_list[idx // 4]
-        xv = np.load(f'{dotenv_values()['MBHM_DATA_DIR']}/{uuid}.npy')
-        t_id = idx % 4
-        text = self.text_dict[label][t_id].pop()
-        self.text_dict[label][t_id].insert(0, text)
-        xt, gt = text
-        return xv, label, cid, xt, gt
+        corpus_data = self.corpus[idx]
+        sample_id = corpus_data['id']
+        instruction = corpus_data['instruction']
+        response = corpus_data['response']
+        ref_id = corpus_data['ref_id']
+        vib_id = corpus_data['vib_id']
+        ref_data = self.vib_data[ref_id]
+        vib_data = self.vib_data[vib_id]
+        vib = np.array([vib_data, ref_data])
+        label_id = corpus_data['label_id']
+        return sample_id, label_id, vib,  instruction, response
+
+
+if __name__ == '__main__':
+    a, b, c = get_loaders(100, 10)
+    print(len(a))
+    for sample in a:
+        print(sample[0].shape, sample[1].shape)
+        print(sample[0].max(), sample[0].min())
+        break

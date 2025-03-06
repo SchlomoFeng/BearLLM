@@ -77,9 +77,12 @@ class FeatureEncoder(nn.Module):
         )
 
     def forward(self, x):
-        query = self.conv_query(x[:, :1, :])
-        ref = self.conv_ref(x[:, 1:2, :])
-        res = self.conv_res(x[:, 2:, :])
+        query = x[:, :1, :]
+        ref = x[:, 1:, :]
+        res = query - ref
+        query = self.conv_query(query)
+        ref = self.conv_ref(ref)
+        res = self.conv_res(res)
         x = torch.cat([query, ref, res], dim=1)
         x = self.conv(x)
         return x

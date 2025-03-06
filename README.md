@@ -1,6 +1,6 @@
 <div align="center">
-<a href="https://www.python.org/">
-<img src="./docs/images/logo.svg" width="200" alt="logo"/>
+<a href="https://github.com/SIA-IDE/BearLLM">
+<img src="https://raw.githubusercontent.com/SIA-IDE/BearLLM/refs/heads/main/docs/images/logo.svg" width="200" alt="logo"/>
 </a>
 <h1>BearLLM: A Prior Knowledge-Enhanced Bearing Health Management Framework with Unified Vibration Signal Representation</h1>
 
@@ -11,13 +11,23 @@
 <a href="https://github.com/SIA-IDE/BearLLM"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/SIA-IDE/BearLLM"></a>
 </div>
 
+<h4 align="center">
+    <p>
+        <b>English</b> |
+        <a href="https://github.com/SIA-IDE/BearLLM/blob/main/docs/README_zh.md">简体中文</a>
+    </p>
+</h4>
+
 ## 🔥 NEWS
+- **[2025-03-06]** 🌟 The complete dataset and code are now officially open source!
 - **[2024-12-11]** ⏫ We are now working on making the code of BearLLM public. Stay tuned!
 - **[2024-12-10]** 🎉 The BearLLM paper is accepted by the Thirty-Ninth AAAI Conference on Artificial Intelligence ([AAAI-25](https://aaai.org/conference/aaai/aaai-25/)).
 - **[2024-08-21]** 📝 The preprint of the BearLLM paper is available on arXiv. Check the [paper page](https://arxiv.org/abs/2408.11281) for more details.
 
 ## 📅 TODO
-- [ ] Upload the health management corpus of the MBHM dataset.
+- [ ] Improve related comments and documentation.
+- [x] Upload the complete BearLLM demo code.
+- [x] Upload the health management corpus of the MBHM dataset.
 - [x] Collect the codes for pre-training and fine-tuning BearLLM.
 - [x] Collect the codes of BearLLM's classification network and other comparison models.
 - [x] Upload the vibration signal portion of the MBHM dataset.
@@ -31,14 +41,88 @@ The [MBHM](https://huggingface.co/datasets/SIA-IDE/MBHM) dataset is the first mu
 
 The code is implemented in Python 3.12. The required packages are listed in the `requirements.txt` file. You can install the required packages by running the following command:
 
-```
+```bash
 conda create --name bearllm python=3.12
 conda activate bearllm
-conda install pytorch pytorch-cuda=12.4 -c pytorch -c nvidia
 pip install -r requirements.txt
-pip install git+https://github.com/huggingface/transformers
-pip install git+https://github.com/huggingface/peft
 ```
+
+
+## 🚀 Quick Start
+
+### 1. Download Demo Data / Use Your Own Data
+
+First, you need to download the `demo_data.json` from the [MBHM](https://huggingface.co/datasets/SIA-IDE/MBHM/tree/main) dataset.
+For users in mainland China, you can use the [mirror link](https://hf-mirror.com/datasets/SIA-IDE/MBHM/tree/main) to speed up the download:
+
+Or, you can also build your own test data in the same format:
+`instruction`: Text instruction for health management task.
+`vib_data`: Vibration signal data to be identified, with a required duration of 1 second.
+`ref_data`: Reference vibration signal data without faults, with a required duration of 1 second.
+
+```json
+{
+    "instruction": "xxx.",
+    "vib_data": [1.0, 0.0, 1.0, ...],
+    "ref_data": [1.0, 0.0, 1.0, ...],
+}
+```
+
+### 2. Download Weights
+
+You can download the pre-trained weights of [Qwen2.5-1.5B](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/tree/main) from Hugging Face.
+
+Additionally, you need to download the weights of [BearLLM](https://huggingface.co/SIA-IDE/BearLLM/tree/main).
+
+### 3. Organize Files
+
+It is recommended to organize the weights and test data as follows:
+
+```
+BearLLM/
+├── qwen_weights/
+│   ├── model.safetensors
+│   ├── tokenizer.json
+│   ├── config.json
+│   └── other files...
+├── bearllm_weights/
+│   ├── vibration_adapter.pth
+│   ├── adapter_config.json
+│   └── adapter_model.safetensors
+└── mbhm_dataset/
+    └── demo_data.json 
+```
+
+### 4. Run Code
+First, copy the `.env.example` file to `.env` and modify the data paths inside.
+Then, you can run the code using the following command:
+
+```bash
+python run_demo.py
+```
+
+## ⚙️ Development
+
+### 1. Download Dataset
+
+First, you need to download the following files from the [MBHM](https://huggingface.co/datasets/SIA-IDE/MBHM/tree/main) dataset. For users in mainland China, you can use the [mirror link](https://hf-mirror.com/datasets/SIA-IDE/MBHM/tree/main) to speed up the download:
+
+- `data.hdf5`: Contains the vibration signal data.
+- `corpus.json`: Contains the health management corpus.
+- `metadata.sqlite`: Contains metadata information of the dataset.
+
+### 2. Download Weights
+
+You can download the pre-trained weights of [Qwen2.5-1.5B](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/tree/main) from Hugging Face.
+
+### 3. Modify Environment Variables
+
+Copy the `.env.example` file to `.env` and modify the data paths inside.
+
+### 4. Pre-train and Fine-tune Model
+
+Pre-train according to `src/pre_training.py`.
+Fine-tune according to `src/fine_tuning.py`.
 
 ## 📖 Citation
 Please cite the following paper if you use this study in your research:
