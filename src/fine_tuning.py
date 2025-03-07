@@ -196,13 +196,13 @@ class AlignmentAdapter(nn.Module):
 
 
 class ModifiedEmbedding(nn.Module):
-    def __init__(self, embedding):
+    def __init__(self, embedding, train_mode=True):
         super().__init__()
         self.embedding = embedding
         self.adapter = AlignmentAdapter()
         self.adapter.load_weights()
         self.adapter.to(embedding.weight.device)
-        self.signal_converter = IdConverter()
+        self.signal_converter = IdConverter(train_mode=train_mode)
 
     def forward(self, x):
         if x.max() >= signal_token_id:
@@ -220,7 +220,7 @@ class ModifiedEmbedding(nn.Module):
             return self.embedding(x)
 
 
-def get_bearllm():
+def get_bearllm(train_mode=True):
     hp = HyperParameters()
     config = AutoConfig.from_pretrained(f'{qwen_weights}/config.json')
     model = AutoModelForCausalLM.from_pretrained(
@@ -231,7 +231,7 @@ def get_bearllm():
         config=config
     )
     embedding = model.get_input_embeddings()
-    mod_embedding = ModifiedEmbedding(embedding)
+    mod_embedding = ModifiedEmbedding(embedding, train_mode=train_mode)
     model.set_input_embeddings(mod_embedding)
     return model
 

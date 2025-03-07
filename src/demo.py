@@ -40,7 +40,7 @@ def run_demo():
     attention_mask = torch.ones_like(user_ids)
     attention_mask = attention_mask.to(device)
 
-    model = get_bearllm()
+    model = get_bearllm(train_mode=False)
     model = PeftModel.from_pretrained(model, f'{bearllm_weights}')
     model.eval()
 
